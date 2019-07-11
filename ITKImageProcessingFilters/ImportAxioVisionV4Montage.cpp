@@ -123,7 +123,8 @@ ImportAxioVisionV4MontagePrivate::ImportAxioVisionV4MontagePrivate(ImportAxioVis
 //
 // -----------------------------------------------------------------------------
 ImportAxioVisionV4Montage::ImportAxioVisionV4Montage()
-: m_InputFile("")
+: m_MontageName("Untitled Zeiss AxioVision Montage")
+, m_InputFile("")
 , m_DataContainerPath(ITKImageProcessing::Montage::k_DataContaineNameDefaultName)
 , m_CellAttributeMatrixName(ITKImageProcessing::Montage::k_TileAttributeMatrixDefaultName)
 , m_ImageDataArrayName(ITKImageProcessing::Montage::k_TileDataArrayDefaultName)
@@ -665,6 +666,7 @@ void ImportAxioVisionV4Montage::generateDataStructure()
   int32_t colCountPadding = MetaXmlUtils::CalculatePaddingDigits(m_ColumnCount);
   int charPaddingCount = std::max(rowCountPadding, colCountPadding);
 
+  QStringList dcNames;
   for(const auto& bound : bounds)
   {
     if(bound.Row < m_MontageStart[1] || bound.Row > m_MontageEnd[1] || bound.Col < m_MontageStart[0] || bound.Col > m_MontageEnd[0])
@@ -684,6 +686,7 @@ void ImportAxioVisionV4Montage::generateDataStructure()
     dcNameStream << "c";
     dcNameStream.setFieldWidth(charPaddingCount);
     dcNameStream << bound.Col;
+    dcNames.push_back(dcName);
 
     // Create the DataContainer with a name based on the ROW & COLUMN indices
     DataContainer::Pointer dc = dca->createNonPrereqDataContainer<AbstractFilter>(this, dcName);
@@ -706,6 +709,8 @@ void ImportAxioVisionV4Montage::generateDataStructure()
       dc->addOrReplaceAttributeMatrix(bound.MetaData);
     }
   }
+
+  dca->createNonPrereqGridMontage(this, m_MontageName, SizeVec3Type(m_RowCount, m_ColumnCount, 1), dcNames);
 }
 
 // -----------------------------------------------------------------------------

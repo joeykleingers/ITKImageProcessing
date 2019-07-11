@@ -48,6 +48,7 @@ class ITKImageProcessing_EXPORT ITKImportRoboMetMontage : public AbstractFilter
   Q_OBJECT
 
   PYB11_CREATE_BINDINGS(ITKImportRoboMetMontage SUPERCLASS AbstractFilter)
+  PYB11_PROPERTY(QString MontageName READ getMontageName WRITE setMontageName)
   PYB11_PROPERTY(QString InputFile READ getInputFile WRITE setInputFile)
   PYB11_PROPERTY(DataArrayPath DataContainerPath READ getDataContainerPath WRITE setDataContainerPath)
   PYB11_PROPERTY(QString CellAttributeMatrixName READ getCellAttributeMatrixName WRITE setCellAttributeMatrixName)
@@ -85,6 +86,9 @@ public:
   SIMPL_TYPE_MACRO_SUPER_OVERRIDE(ITKImportRoboMetMontage, AbstractFilter)
 
   ~ITKImportRoboMetMontage() override;
+
+  SIMPL_FILTER_PARAMETER(QString, MontageName)
+  Q_PROPERTY(QString MontageName READ getMontageName WRITE setMontageName)
 
   SIMPL_FILTER_PARAMETER(QString, InputFile)
   Q_PROPERTY(QString InputFile READ getInputFile WRITE setInputFile)

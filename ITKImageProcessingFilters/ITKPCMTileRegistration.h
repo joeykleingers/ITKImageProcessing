@@ -35,7 +35,6 @@
 
 #pragma once
 
-
 #include "SIMPLib/Common/SIMPLibSetGetMacros.h"
 #include "SIMPLib/DataContainers/DataContainerArrayProxy.h"
 #include "SIMPLib/Filtering/AbstractFilter.h"
@@ -61,6 +60,8 @@ class ITKImageProcessing_EXPORT ITKPCMTileRegistration : public AbstractFilter
   Q_OBJECT
 
   PYB11_CREATE_BINDINGS(ITKPCMTileRegistration SUPERCLASS AbstractFilter)
+
+  PYB11_PROPERTY(QString MontageName READ getMontageName WRITE setMontageName)
   PYB11_PROPERTY(IntVec2Type MontageStart READ getMontageStart WRITE setMontageStart)
   PYB11_PROPERTY(IntVec2Type MontageEnd READ getMontageEnd WRITE setMontageEnd)
   PYB11_PROPERTY(QString DataContainerPrefix READ getDataContainerPrefix WRITE setDataContainerPrefix)
@@ -74,14 +75,14 @@ public:
 
   ~ITKPCMTileRegistration() override;
 
+  SIMPL_FILTER_PARAMETER(QString, MontageName)
+  Q_PROPERTY(QString MontageName READ getMontageName WRITE setMontageName)
+
   SIMPL_FILTER_PARAMETER(IntVec2Type, MontageStart)
   Q_PROPERTY(IntVec2Type MontageStart READ getMontageStart WRITE setMontageStart)
 
   SIMPL_FILTER_PARAMETER(IntVec2Type, MontageEnd)
   Q_PROPERTY(IntVec2Type MontageEnd READ getMontageEnd WRITE setMontageEnd)
-
-  SIMPL_FILTER_PARAMETER(QString, DataContainerPrefix)
-  Q_PROPERTY(QString DataContainerPrefix READ getDataContainerPrefix WRITE setDataContainerPrefix)
 
   SIMPL_FILTER_PARAMETER(QString, CommonAttributeMatrixName)
   Q_PROPERTY(QString CommonAttributeMatrixName READ getCommonAttributeMatrixName WRITE setCommonAttributeMatrixName)
@@ -190,14 +191,16 @@ protected:
    * @param peakMethodToUse
    * @param streamSubdivisions
    */
-  template <typename PixelType> void registerGrayscaleMontage(int peakMethodToUse = 0, unsigned streamSubdivisions = 1);
+  template <typename PixelType>
+  void registerGrayscaleMontage(int peakMethodToUse = 0, unsigned streamSubdivisions = 1);
 
   /**
    * @brief registerRGBMontage
    * @param peakMethodToUse
    * @param streamSubdivisions
    */
-  template <typename PixelType> void registerRGBMontage(int peakMethodToUse = 0, unsigned streamSubdivisions = 1);
+  template <typename PixelType>
+  void registerRGBMontage(int peakMethodToUse = 0, unsigned streamSubdivisions = 1);
 
   /**
    * @brief Get the image from the appropriate data container
@@ -214,44 +217,43 @@ protected:
 
 private:
   static constexpr unsigned Dimension = 2;
-  itk::TileLayout2D m_StageTiles;
-  itk::TileLayout2D m_ActualTiles;
-  //  unsigned int m_xMontageStart;
-  //  unsigned int m_yMontageStart;
-  //  QString m_dataContainerPrefix;
-  std::vector<DataContainer::Pointer> m_DataContainers;
 
   /**
    * @brief createMontage
    * @param peakMethodToUse
    * @param streamSubdivisions
    */
-  template <typename PixelType, typename MontageType> typename MontageType::Pointer createMontage(int peakMethodToUse = 0);
+  template <typename PixelType, typename MontageType>
+  typename MontageType::Pointer createMontage(int peakMethodToUse = 0);
 
   /**
    * @brief createGrayscaleMontage
    * @param peakMethodToUse
    * @param streamSubdivisions
    */
-  template <typename PixelType, typename MontageType> typename MontageType::Pointer createGrayscaleMontage(int peakMethodToUse = 0);
+  template <typename PixelType, typename MontageType>
+  typename MontageType::Pointer createGrayscaleMontage(int peakMethodToUse = 0);
 
   /**
    * @brief createRGBMontage
    * @param peakMethodToUse
    * @param streamSubdivisions
    */
-  template <typename PixelType, typename MontageType> typename MontageType::Pointer createRGBMontage(int peakMethodToUse = 0);
+  template <typename PixelType, typename MontageType>
+  typename MontageType::Pointer createRGBMontage(int peakMethodToUse = 0);
 
   /**
    * @brief storeMontageTransforms
    */
-  template <typename MontageType> void storeMontageTransforms(typename MontageType::Pointer montage);
+  template <typename MontageType>
+  void storeMontageTransforms(typename MontageType::Pointer montage);
 
   /**
    * @brief executeMontageRegistration
    * @param montage
    */
-  template <typename MontageType> void executeMontageRegistration(typename MontageType::Pointer montage);
+  template <typename MontageType>
+  void executeMontageRegistration(typename MontageType::Pointer montage);
 
 public:
   ITKPCMTileRegistration(const ITKPCMTileRegistration&) = delete;            // Copy Constructor Not Implemented

@@ -662,8 +662,8 @@ void ImportAxioVisionV4Montage::generateDataStructure()
   DataContainerArray::Pointer dca = getDataContainerArray();
 
   // int imageCountPadding = MetaXmlUtils::CalculatePaddingDigits(bounds.size());
-  int32_t rowCountPadding = MetaXmlUtils::CalculatePaddingDigits(m_RowCount);
-  int32_t colCountPadding = MetaXmlUtils::CalculatePaddingDigits(m_ColumnCount);
+  int32_t rowCountPadding = MetaXmlUtils::CalculatePaddingDigits(m_MontageEnd[1]);
+  int32_t colCountPadding = MetaXmlUtils::CalculatePaddingDigits(m_MontageEnd[0]);
   int charPaddingCount = std::max(rowCountPadding, colCountPadding);
 
   QStringList dcNames;
@@ -710,7 +710,9 @@ void ImportAxioVisionV4Montage::generateDataStructure()
     }
   }
 
-  dca->createNonPrereqGridMontage(this, m_MontageName, SizeVec3Type(m_RowCount, m_ColumnCount, 1), dcNames);
+  size_t rowCount = m_MontageEnd[1] - m_MontageStart[1] + 1;
+  size_t colCount = m_MontageEnd[0] - m_MontageStart[0] + 1;
+  dca->createNonPrereqGridMontage(this, m_MontageName, SizeVec3Type(rowCount, colCount, 1), dcNames);
 }
 
 // -----------------------------------------------------------------------------
@@ -773,10 +775,12 @@ void ImportAxioVisionV4Montage::readImages()
   // Import Each Image
   DataContainerArray::Pointer dca = getDataContainerArray();
 
-  //  int imageCountPadding = MetaXmlUtils::CalculatePaddingDigits(bounds.size());
-  int32_t rowCountPadding = MetaXmlUtils::CalculatePaddingDigits(m_RowCount);
-  int32_t colCountPadding = MetaXmlUtils::CalculatePaddingDigits(m_ColumnCount);
-  int charPaddingCount = std::max(rowCountPadding, colCountPadding);
+  GridMontage::Pointer gridMontage = std::dynamic_pointer_cast<GridMontage>(dca->getMontage(m_MontageName));
+  if(gridMontage == nullptr)
+  {
+    setErrorCondition(-206, tr("The montage '%1' is not a grid montage.").arg(m_MontageName));
+    return;
+  }
 
   for(const auto& bound : bounds)
   {
@@ -789,21 +793,10 @@ void ImportAxioVisionV4Montage::readImages()
     QTextStream out(&msg);
     out << "Importing " << bound.Filename;
     notifyStatusMessage(msg);
-    // Create our DataContainer Name using a Prefix and a rXXcYY format.
-    QString dcName = getDataContainerPath().getDataContainerName();
-    QTextStream dcNameStream(&dcName);
-    dcNameStream << "_r";
-    dcNameStream.setFieldWidth(charPaddingCount);
-    dcNameStream.setFieldAlignment(QTextStream::AlignRight);
-    dcNameStream.setPadChar('0');
-    dcNameStream << bound.Row;
-    dcNameStream.setFieldWidth(0);
-    dcNameStream << "c";
-    dcNameStream.setFieldWidth(charPaddingCount);
-    dcNameStream << bound.Col;
 
     // The DataContainer with a name based on the ROW & COLUMN indices is already created in the preflight
-    DataContainer::Pointer dc = dca->getDataContainer(dcName);
+    GridTileIndex tileIndex = gridMontage->getTileIndex(bound.Row, bound.Col);
+    DataContainerShPtr dc = tileIndex.getDataContainer();
     // So is the Geometry
     ImageGeom::Pointer image = dc->getGeometryAs<ImageGeom>();
 

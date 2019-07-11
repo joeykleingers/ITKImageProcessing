@@ -38,13 +38,13 @@
 #include <algorithm>
 #include <type_traits>
 
-
 #include "SIMPLib/Common/Constants.h"
 #include "SIMPLib/Common/TemplateHelpers.h"
 #include "SIMPLib/FilterParameters/DataArraySelectionFilterParameter.h"
 #include "SIMPLib/FilterParameters/FloatFilterParameter.h"
 #include "SIMPLib/FilterParameters/IntVec2FilterParameter.h"
 #include "SIMPLib/FilterParameters/LinkedBooleanFilterParameter.h"
+#include "SIMPLib/FilterParameters/MontageStructureSelectionFilterParameter.h"
 #include "SIMPLib/FilterParameters/MultiDataContainerSelectionFilterParameter.h"
 #include "SIMPLib/FilterParameters/SeparatorFilterParameter.h"
 #include "SIMPLib/FilterParameters/StringFilterParameter.h"
@@ -86,9 +86,8 @@
   }                                                                                                                                                                                                    \
   else                                                                                                                                                                                                 \
   {                                                                                                                                                                                                    \
-    filter->setErrorCondition(TemplateHelpers::Errors::UnsupportedImageType,                                                                                                                                                \
-                               "The input array's image type is not recognized.  Supported image types"                                                                                                \
-                               " are grayscale (1-component), RGB (3-component), and RGBA (4-component)");                                                                                                                         \
+    filter->setErrorCondition(TemplateHelpers::Errors::UnsupportedImageType, "The input array's image type is not recognized.  Supported image types"                                                  \
+                                                                             " are grayscale (1-component), RGB (3-component), and RGBA (4-component)");                                               \
   }
 
 #define EXECUTE_DATATYPE_FUNCTION_TEMPLATE(filter, rgb_call, grayscale_call, inputData, ...)                                                                                                           \
@@ -142,47 +141,18 @@
   }                                                                                                                                                                                                    \
   else                                                                                                                                                                                                 \
   {                                                                                                                                                                                                    \
-    filter->setErrorCondition(TemplateHelpers::Errors::UnsupportedDataType, "The input array's data type is not supported");                                                 \
+    filter->setErrorCondition(TemplateHelpers::Errors::UnsupportedDataType, "The input array's data type is not supported");                                                                           \
   }
 
 #define EXECUTE_REGISTER_FUNCTION_TEMPLATE(filter, rgb_call, grayscale_call, inputData, ...) EXECUTE_DATATYPE_FUNCTION_TEMPLATE(filter, rgb_call, grayscale_call, inputData, __VA_ARGS__)
 
 itk::NumericTraits<float> nmfloat;
 
-namespace
-{
-QString generateDataContainerName(const QString& dataContainerPrefix, const IntVec2Type& montageStart, const IntVec2Type& montageEnd, int32_t row, int32_t col)
-{
-  IntVec3Type montageSize;
-  std::transform(montageStart.begin(), montageStart.end(), montageEnd.begin(), montageSize.begin(), [](int32_t a, int32_t b) -> int32_t { return a + b + 1; });
-  int32_t rowCount = montageSize[1];
-  int32_t colCount = montageSize[0];
-
-  int32_t rowCountPadding = MetaXmlUtils::CalculatePaddingDigits(rowCount);
-  int32_t colCountPadding = MetaXmlUtils::CalculatePaddingDigits(colCount);
-  int charPaddingCount = std::max(rowCountPadding, colCountPadding);
-
-  QString dcName = dataContainerPrefix;
-  QTextStream dcNameStream(&dcName);
-  dcNameStream << "r";
-  dcNameStream.setFieldWidth(charPaddingCount);
-  dcNameStream.setFieldAlignment(QTextStream::AlignRight);
-  dcNameStream.setPadChar('0');
-  dcNameStream << row;
-  dcNameStream.setFieldWidth(0);
-  dcNameStream << "c";
-  dcNameStream.setFieldWidth(charPaddingCount);
-  dcNameStream << col;
-  return dcName;
-}
-} // namespace
-
 // -----------------------------------------------------------------------------
 //
 // -----------------------------------------------------------------------------
 ITKPCMTileRegistration::ITKPCMTileRegistration()
-: m_DataContainerPrefix("")
-, m_CommonAttributeMatrixName(ITKImageProcessing::Montage::k_TileAttributeMatrixDefaultName)
+: m_CommonAttributeMatrixName(ITKImageProcessing::Montage::k_TileAttributeMatrixDefaultName)
 , m_CommonDataArrayName(ITKImageProcessing::Montage::k_TileDataArrayDefaultName)
 //, m_TileOverlap(10.0f)
 {
@@ -211,10 +181,10 @@ void ITKPCMTileRegistration::setupFilterParameters()
 {
   FilterParameterVectorType parameters;
 
+  parameters.push_back(SIMPL_NEW_MONTAGE_STRUCTURE_SELECTION_FP("Montage", MontageName, FilterParameter::Parameter, ITKPCMTileRegistration));
+
   parameters.push_back(SIMPL_NEW_INT_VEC2_FP("Montage Start (Col, Row) [Inclusive, Zero Based]", MontageStart, FilterParameter::Parameter, ITKPCMTileRegistration));
   parameters.push_back(SIMPL_NEW_INT_VEC2_FP("Montage End (Col, Row) [Inclusive, Zero Based]", MontageEnd, FilterParameter::Parameter, ITKPCMTileRegistration));
-
-  parameters.push_back(SIMPL_NEW_STRING_FP("Data Container Prefix", DataContainerPrefix, FilterParameter::RequiredArray, ITKPCMTileRegistration));
 
   parameters.push_back(SIMPL_NEW_STRING_FP("Common Attribute Matrix", CommonAttributeMatrixName, FilterParameter::RequiredArray, ITKPCMTileRegistration));
   parameters.push_back(SIMPL_NEW_STRING_FP("Common Data Array", CommonDataArrayName, FilterParameter::RequiredArray, ITKPCMTileRegistration));
@@ -231,63 +201,77 @@ void ITKPCMTileRegistration::dataCheck()
   clearWarningCode();
   initialize();
 
-  IntVec2Type montageSize;
-  std::transform(m_MontageStart.begin(), m_MontageStart.end(), m_MontageEnd.begin(), montageSize.begin(), [](int32_t a, int32_t b) -> int32_t { return a + b + 1; });
-  int32_t rowCount = montageSize[1];
-  int32_t colCount = montageSize[0];
+  DataContainerArray::Pointer dca = getDataContainerArray();
 
-  if(montageSize[0] <= 0 || montageSize[1] <= 0)
+  GridMontage::Pointer gridMontage = std::dynamic_pointer_cast<GridMontage>(dca->getMontage(m_MontageName));
+  if(gridMontage == nullptr)
   {
-    QString ss = QObject::tr("The Montage Size x and y values must be greater than 0");
-    setErrorCondition(-11000, ss);
+    setErrorCondition(-11000, tr("The montage '%1' is not a grid montage.").arg(m_MontageName));
     return;
   }
 
-  if(getDataContainerPrefix().isEmpty())
+  if(!gridMontage->isValid())
   {
-    QString ss = QObject::tr("DataContainer Prefix Attribute Matrix is empty.");
+    QString ss = QObject::tr("The selected montage '%1' is invalid.").arg(m_MontageName);
+    setErrorCondition(-11001, ss);
+    return;
+  }
+
+  if(m_MontageStart[0] > m_MontageEnd[0])
+  {
+    QString ss = QObject::tr("The montage start column (%1) is greater than the montage end column (%2).").arg(m_MontageStart[0], m_MontageEnd[0]);
+    setErrorCondition(-11002, ss);
+    return;
+  }
+
+  if(m_MontageStart[1] > m_MontageEnd[1])
+  {
+    QString ss = QObject::tr("The montage start row (%1) is greater than the montage end row (%2).").arg(m_MontageStart[1], m_MontageEnd[1]);
     setErrorCondition(-11003, ss);
+    return;
+  }
+
+  if(m_MontageEnd[0] > gridMontage->getColumnCount() - 1)
+  {
+    QString ss = QObject::tr("The montage end column (%1) is greater than the last column (%2) in montage '%3'.")
+                     .arg(QString::number(m_MontageEnd[0]), QString::number(gridMontage->getColumnCount() - 1), m_MontageName);
+    setErrorCondition(-11004, ss);
+    return;
+  }
+
+  if(m_MontageEnd[1] > gridMontage->getRowCount() - 1)
+  {
+    QString ss = QObject::tr("The montage end row (%1) is greater than the last row (%2) in montage '%3'.")
+                     .arg(QString::number(m_MontageEnd[1]), QString::number(gridMontage->getRowCount() - 1), m_MontageName);
+    setErrorCondition(-11005, ss);
     return;
   }
 
   if(getCommonAttributeMatrixName().isEmpty())
   {
     QString ss = QObject::tr("Common Attribute Matrix is empty.");
-    setErrorCondition(-11003, ss);
+    setErrorCondition(-11006, ss);
     return;
   }
 
   if(getCommonDataArrayName().isEmpty())
   {
     QString ss = QObject::tr("Common Data Array is empty.");
-    setErrorCondition(-11004, ss);
+    setErrorCondition(-11007, ss);
     return;
   }
 
-  m_DataContainers.clear();
-
-  DataContainerArray::Pointer dca = getDataContainerArray();
-  // This is for the Tile Data Structure that we need to build up
-  m_StageTiles.resize(rowCount);
-
   for(int32_t row = m_MontageStart[1]; row <= m_MontageEnd[1]; row++)
   {
-    m_StageTiles[row - m_MontageStart[1]].resize(colCount);
     for(int32_t col = m_MontageStart[0]; col <= m_MontageEnd[0]; col++)
     {
-      // Create our DataContainer Name using a Prefix and a rXXcYY format.
-      QString dcName = ::generateDataContainerName(getDataContainerPrefix(), m_MontageStart, m_MontageEnd, row, col);
+      GridTileIndex tileIndex = gridMontage->getTileIndex(row, col);
+      DataContainerShPtr dc = tileIndex.getDataContainer();
 
       DataArrayPath testPath;
-      testPath.setDataContainerName(dcName);
+      testPath.setDataContainerName(dc->getName());
       testPath.setAttributeMatrixName(getCommonAttributeMatrixName());
       testPath.setDataArrayName(getCommonDataArrayName());
-
-      DataContainer::Pointer dc = dca->getPrereqDataContainer(this, testPath);
-      if(getErrorCode() < 0)
-      {
-        return;
-      }
 
       IDataArray::Pointer imagePtr = dca->getPrereqIDataArrayFromPath<IDataArray, AbstractFilter>(this, testPath);
       if(getErrorCode() < 0)
@@ -295,20 +279,11 @@ void ITKPCMTileRegistration::dataCheck()
         return;
       }
 
-      ImageGeom::Pointer image = dca->getPrereqGeometryFromDataContainer<ImageGeom, AbstractFilter>(this, dcName);
+      ImageGeom::Pointer image = dc->getPrereqGeometry<ImageGeom, AbstractFilter>(this);
       if(getErrorCode() < 0)
       {
         return;
       }
-      m_DataContainers.push_back(dc);
-
-      FloatVec3Type origin = image->getOrigin();
-
-      itk::Tile2D tile;
-      tile.FileName = "";
-      tile.Position[0] = static_cast<double>(origin[0]);
-      tile.Position[1] = static_cast<double>(origin[1]);
-      m_StageTiles[row - m_MontageStart[1]][col - m_MontageStart[0]] = tile;
     }
   }
 }
@@ -339,7 +314,19 @@ void ITKPCMTileRegistration::execute()
     return;
   }
 
-  IDataArray::Pointer da = m_DataContainers[0]->getAttributeMatrix(getCommonAttributeMatrixName())->getAttributeArray(getCommonDataArrayName());
+  DataContainerArray::Pointer dca = getDataContainerArray();
+
+  GridMontage::Pointer gridMontage = std::dynamic_pointer_cast<GridMontage>(dca->getMontage(m_MontageName));
+  if(gridMontage == nullptr)
+  {
+    setErrorCondition(-206, tr("The montage '%1' is not a grid montage.").arg(m_MontageName));
+    return;
+  }
+
+  GridTileIndex tileIndex = gridMontage->getTileIndex(0, 0);
+  DataContainerShPtr dc = tileIndex.getDataContainer();
+
+  IDataArray::Pointer da = dc->getAttributeMatrix(getCommonAttributeMatrixName())->getAttributeArray(getCommonDataArrayName());
 
   EXECUTE_REGISTER_FUNCTION_TEMPLATE(this, registerRGBMontage, registerGrayscaleMontage, da);
 
@@ -373,7 +360,6 @@ typename MontageType::Pointer ITKPCMTileRegistration::createMontage(int peakMeth
     y1 = 0;
   }
 
-
   // Create tile montage
   using SizeValueType = itk::Size<2>::SizeValueType;
   typename MontageType::Pointer montage = MontageType::New();
@@ -404,6 +390,14 @@ typename MontageType::Pointer ITKPCMTileRegistration::createGrayscaleMontage(int
 
   typename MontageType::Pointer montage = createMontage<PixelType, MontageType>(peakMethodToUse);
 
+  DataContainerArray::Pointer dca = getDataContainerArray();
+  GridMontage::Pointer gridMontage = std::dynamic_pointer_cast<GridMontage>(dca->getMontage(m_MontageName));
+  if(gridMontage == nullptr)
+  {
+    setErrorCondition(-206, tr("The montage '%1' is not a grid montage.").arg(m_MontageName));
+    return {};
+  }
+
   // Set tile image data from DREAM3D structure into tile montage
   for(int32_t row = m_MontageStart[1]; row <= m_MontageEnd[1]; row++)
   {
@@ -413,9 +407,8 @@ typename MontageType::Pointer ITKPCMTileRegistration::createGrayscaleMontage(int
     {
       ind[0] = col - m_MontageStart[0];
 
-      // Get our DataContainer Name using a Prefix and a rXXcYY format.
-      QString dcName = ::generateDataContainerName(getDataContainerPrefix(), m_MontageStart, m_MontageEnd, row, col);
-      DataContainer::Pointer dc = getDataContainerArray()->getDataContainer(dcName);
+      GridTileIndex tileIndex = gridMontage->getTileIndex(row, col);
+      DataContainerShPtr dc = tileIndex.getDataContainer();
 
       using InPlaceDream3DToImageFileType = itk::InPlaceDream3DDataToImageFilter<ScalarPixelType, Dimension>;
       typename InPlaceDream3DToImageFileType::Pointer toITK = InPlaceDream3DToImageFileType::New();
@@ -447,6 +440,14 @@ typename MontageType::Pointer ITKPCMTileRegistration::createRGBMontage(int peakM
 
   typename MontageType::Pointer montage = createMontage<PixelType, MontageType>(peakMethodToUse);
 
+  DataContainerArray::Pointer dca = getDataContainerArray();
+  GridMontage::Pointer gridMontage = std::dynamic_pointer_cast<GridMontage>(dca->getMontage(m_MontageName));
+  if(gridMontage == nullptr)
+  {
+    setErrorCondition(-206, tr("The montage '%1' is not a grid montage.").arg(m_MontageName));
+    return {};
+  }
+
   // Set tile image data from DREAM3D structure into tile montage
   for(int32_t row = m_MontageStart[1]; row <= m_MontageEnd[1]; row++)
   {
@@ -456,9 +457,8 @@ typename MontageType::Pointer ITKPCMTileRegistration::createRGBMontage(int peakM
     {
       ind[0] = col - m_MontageStart[0];
 
-      // Get our DataContainer Name using a Prefix and a rXXcYY format.
-      QString dcName = ::generateDataContainerName(getDataContainerPrefix(), m_MontageStart, m_MontageEnd, row, col);
-      DataContainer::Pointer dc = getDataContainerArray()->getDataContainer(dcName);
+      GridTileIndex tileIndex = gridMontage->getTileIndex(row, col);
+      DataContainerShPtr dc = tileIndex.getDataContainer();
 
       using InPlaceDream3DToImageFileType = itk::InPlaceDream3DDataToImageFilter<PixelType, Dimension>;
       typename InPlaceDream3DToImageFileType::Pointer toITK = InPlaceDream3DToImageFileType::New();
@@ -549,6 +549,14 @@ void ITKPCMTileRegistration::storeMontageTransforms(typename MontageType::Pointe
 {
   using TransformType = itk::TranslationTransform<double, Dimension>;
 
+  DataContainerArray::Pointer dca = getDataContainerArray();
+  GridMontage::Pointer gridMontage = std::dynamic_pointer_cast<GridMontage>(dca->getMontage(m_MontageName));
+  if(gridMontage == nullptr)
+  {
+    setErrorCondition(-206, tr("The montage '%1' is not a grid montage.").arg(m_MontageName));
+    return;
+  }
+
   // Set tile image data from DREAM3D structure into tile montage
   for(int32_t row = m_MontageStart[1]; row <= m_MontageEnd[1]; row++)
   {
@@ -560,9 +568,8 @@ void ITKPCMTileRegistration::storeMontageTransforms(typename MontageType::Pointe
 
       const TransformType* regTr = montage->GetOutputTransform(ind);
 
-      // Get our DataContainer Name using a Prefix and a rXXcYY format.
-      QString dcName = ::generateDataContainerName(getDataContainerPrefix(), m_MontageStart, m_MontageEnd, row, col);
-      DataContainer::Pointer imageDC = getDataContainerArray()->getDataContainer(dcName);
+      GridTileIndex tileIndex = gridMontage->getTileIndex(row, col);
+      DataContainerShPtr imageDC = tileIndex.getDataContainer();
 
       ImageGeom::Pointer image = imageDC->getGeometryAs<ImageGeom>();
 

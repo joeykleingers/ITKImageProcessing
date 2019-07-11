@@ -43,6 +43,7 @@
 #include "SIMPLib/FilterParameters/FloatFilterParameter.h"
 #include "SIMPLib/FilterParameters/IntVec2FilterParameter.h"
 #include "SIMPLib/FilterParameters/LinkedBooleanFilterParameter.h"
+#include "SIMPLib/FilterParameters/MontageStructureSelectionFilterParameter.h"
 #include "SIMPLib/FilterParameters/MultiDataContainerSelectionFilterParameter.h"
 #include "SIMPLib/FilterParameters/StringFilterParameter.h"
 #include "SIMPLib/Geometry/ImageGeom.h"
@@ -67,7 +68,7 @@
 #include "itkTileMontage.h"
 #include "itkTxtTransformIOFactory.h"
 
-#define EXECUTE_STITCH_FUNCTION_TEMPLATE_HELPER(DATATYPE, filter, call, inputData, ...)                                                                                                                \
+#define EXECUTE_ACCUMULATETYPE_FUNCTION_TEMPLATE(DATATYPE, filter, call, inputData, ...)                                                                                                               \
   int numOfComponents = inputData->getNumberOfComponents();                                                                                                                                            \
   if(numOfComponents == 3)                                                                                                                                                                             \
   {                                                                                                                                                                                                    \
@@ -80,26 +81,6 @@
   else if(numOfComponents == 1)                                                                                                                                                                        \
   {                                                                                                                                                                                                    \
     call<DATATYPE, uint64_t>(__VA_ARGS__);                                                                                                                                                             \
-  }                                                                                                                                                                                                    \
-  else                                                                                                                                                                                                 \
-  {                                                                                                                                                                                                    \
-    filter->setErrorCondition(TemplateHelpers::Errors::UnsupportedImageType, "The input array's image type is not recognized.  Supported image types"                                                  \
-                                                                             " are grayscale (1-component), RGB (3-component), and RGBA (4-component)");                                               \
-  }
-
-#define EXECUTE_ACCUMULATETYPE_FUNCTION_TEMPLATE(DATATYPE, filter, call, inputData, ...)                                                                                                               \
-  int numOfComponents = inputData->getNumberOfComponents();                                                                                                                                            \
-  if(numOfComponents == 3)                                                                                                                                                                             \
-  {                                                                                                                                                                                                    \
-    EXECUTE_STITCH_FUNCTION_TEMPLATE_HELPER(DATATYPE, filter, call, inputData, __VA_ARGS__);                                                                                                           \
-  }                                                                                                                                                                                                    \
-  else if(numOfComponents == 4)                                                                                                                                                                        \
-  {                                                                                                                                                                                                    \
-    EXECUTE_STITCH_FUNCTION_TEMPLATE_HELPER(DATATYPE, filter, call, inputData, __VA_ARGS__);                                                                                                           \
-  }                                                                                                                                                                                                    \
-  else if(numOfComponents == 1)                                                                                                                                                                        \
-  {                                                                                                                                                                                                    \
-    EXECUTE_STITCH_FUNCTION_TEMPLATE_HELPER(DATATYPE, filter, call, inputData, __VA_ARGS__);                                                                                                           \
   }                                                                                                                                                                                                    \
   else                                                                                                                                                                                                 \
   {                                                                                                                                                                                                    \
@@ -199,14 +180,11 @@ void ITKStitchMontage::setupFilterParameters()
 {
   FilterParameterVectorType parameters;
 
+  parameters.push_back(SIMPL_NEW_MONTAGE_STRUCTURE_SELECTION_FP("Montage", MontageName, FilterParameter::Parameter, ITKStitchMontage));
+
   parameters.push_back(SIMPL_NEW_INT_VEC2_FP("Montage Start (Col, Row) [Inclusive, Zero Based]", MontageStart, FilterParameter::Parameter, ITKStitchMontage));
   parameters.push_back(SIMPL_NEW_INT_VEC2_FP("Montage End (Col, Row) [Inclusive, Zero Based]", MontageEnd, FilterParameter::Parameter, ITKStitchMontage));
 
-  {
-    MultiDataContainerSelectionFilterParameter::RequirementType req =
-        MultiDataContainerSelectionFilterParameter::CreateRequirement(SIMPL::Defaults::AnyPrimitive, SIMPL::Defaults::AnyComponentSize, AttributeMatrix::Type::Cell, IGeometry::Type::Image);
-    parameters.push_back(SIMPL_NEW_MDC_SELECTION_FP("Image Data Containers", ImageDataContainers, FilterParameter::RequiredArray, ITKStitchMontage, req));
-  }
   parameters.push_back(SIMPL_NEW_STRING_FP("Common Attribute Matrix", CommonAttributeMatrixName, FilterParameter::RequiredArray, ITKStitchMontage));
   parameters.push_back(SIMPL_NEW_STRING_FP("Common Data Array", CommonDataArrayName, FilterParameter::RequiredArray, ITKStitchMontage));
 
@@ -240,10 +218,19 @@ void ITKStitchMontage::dataCheck()
     return;
   }
 
-  int selectedDCCount = getImageDataContainers().size();
+  DataContainerArray::Pointer dca = getDataContainerArray();
+
+  GridMontage::Pointer gridMontage = std::dynamic_pointer_cast<GridMontage>(dca->getMontage(m_MontageName));
+  if(gridMontage == nullptr)
+  {
+    setErrorCondition(-206, tr("The montage '%1' is not a grid montage.").arg(m_MontageName));
+    return;
+  }
+
+  int tileCount = gridMontage->getTileCount();
 
   // Test to make sure at least one data container is selected
-  if(selectedDCCount < 1)
+  if(tileCount < 1)
   {
     QString ss = QObject::tr("At least one Data Container must be selected");
     setErrorCondition(-11001, ss);
@@ -252,11 +239,11 @@ void ITKStitchMontage::dataCheck()
 
   int totalMontageSize = std::accumulate(m_MontageSize.begin(), m_MontageSize.end(), 1, std::multiplies<>());
 
-  if(totalMontageSize != selectedDCCount)
+  if(totalMontageSize != tileCount)
   {
-    QString ss = QObject::tr("The number of selected data containers (%1) does not match the number of data "
+    QString ss = QObject::tr("The number of data containers in the montage (%1) does not match the number of data "
                              "containers expected by the montage size dimensions specified (%2)")
-                     .arg(selectedDCCount)
+                     .arg(tileCount)
                      .arg(totalMontageSize);
     setErrorCondition(-11002, ss);
     return;
@@ -277,9 +264,9 @@ void ITKStitchMontage::dataCheck()
   }
 
   // Test to see that the image data containers are correct
-  int dcCount = m_ImageDataContainers.size();
-
-  QString dcName = m_ImageDataContainers[0];
+  GridTileIndex tileIndex = gridMontage->getTileIndex(0, 0);
+  DataContainerShPtr firstDC = tileIndex.getDataContainer();
+  QString dcName = firstDC->getName();
 
   DataArrayPath testPath;
   testPath.setDataContainerName(dcName);
@@ -307,9 +294,10 @@ void ITKStitchMontage::dataCheck()
   }
 
   ImageGeom::Pointer tileImageGeom = ImageGeom::NullPointer();
-  for(int i = 0; i < dcCount; i++)
+  AbstractMontage::CollectionType dcs = gridMontage->getDataContainers();
+  for(const DataContainerShPtr& dc : dcs)
   {
-    QString dcName = m_ImageDataContainers[i];
+    QString dcName = dc->getName();
 
     DataArrayPath testPath;
     testPath.setDataContainerName(dcName);
@@ -347,7 +335,7 @@ void ITKStitchMontage::dataCheck()
 
   DataArrayPath dap(getMontageDataContainerName(), getMontageAttributeMatrixName(), getMontageDataArrayName());
 
-  DataContainer::Pointer dc = getDataContainerArray()->createNonPrereqDataContainer(this, getMontageDataContainerName());
+  DataContainer::Pointer montageDC = getDataContainerArray()->createNonPrereqDataContainer(this, getMontageDataContainerName());
   if(getErrorCode() < 0)
   {
     return;
@@ -361,11 +349,11 @@ void ITKStitchMontage::dataCheck()
   imageGeom->setDimensions(montageArrayXSize, montageArrayYSize, 1);
   imageGeom->setSpacing(tileImageGeom->getSpacing());
 
-  dc->setGeometry(imageGeom);
+  montageDC->setGeometry(imageGeom);
 
   ss = QObject::tr("The image geometry dimensions of data container '%1' are projected to be (%2, %3, %4).  This is assuming "
                    "0% overlap between tiles, so the actual geometry dimensions after executing the stitching algorithm may be smaller.")
-           .arg(dc->getName())
+           .arg(montageDC->getName())
            .arg(montageArrayXSize)
            .arg(montageArrayYSize)
            .arg(1);
@@ -373,7 +361,7 @@ void ITKStitchMontage::dataCheck()
 
   std::vector<size_t> tDims = {montageArrayXSize, montageArrayYSize, 1};
 
-  AttributeMatrix::Pointer am = dc->createNonPrereqAttributeMatrix(this, dap.getAttributeMatrixName(), tDims, AttributeMatrix::Type::Cell);
+  AttributeMatrix::Pointer am = montageDC->createNonPrereqAttributeMatrix(this, dap.getAttributeMatrixName(), tDims, AttributeMatrix::Type::Cell);
   if(getErrorCode() < 0)
   {
     return;
@@ -429,91 +417,27 @@ void ITKStitchMontage::execute()
     return;
   }
 
-  createFijiDataStructure();
-  if(getErrorCode() < 0)
+  // Pass to ITK and generate montage
+  // ITK returns a new Fiji data structure to DREAM3D
+  // Store FIJI DS into SIMPL Transform DS inside the Geometry
+  DataContainerArray::Pointer dca = getDataContainerArray();
+
+  GridMontage::Pointer gridMontage = std::dynamic_pointer_cast<GridMontage>(dca->getMontage(m_MontageName));
+  if(gridMontage == nullptr)
   {
+    setErrorCondition(-206, tr("The montage '%1' is not a grid montage.").arg(m_MontageName));
     return;
   }
 
-  if(!m_StageTiles.empty())
-  {
-    // Pass to ITK and generate montage
-    // ITK returns a new Fiji data structure to DREAM3D
-    // Store FIJI DS into SIMPL Transform DS inside the Geometry
-    DataArrayPath dap(m_ImageDataContainers[0], getCommonAttributeMatrixName(), getCommonDataArrayName());
-    DataContainer::Pointer dc = getDataContainerArray()->getDataContainer(m_ImageDataContainers[0]);
-    AttributeMatrix::Pointer am = dc->getAttributeMatrix(getCommonAttributeMatrixName());
-    IDataArray::Pointer da = am->getAttributeArray(getCommonDataArrayName());
+  GridTileIndex tileIndex = gridMontage->getTileIndex(0, 0);
+  DataContainerShPtr dc = tileIndex.getDataContainer();
+  AttributeMatrix::Pointer am = dc->getAttributeMatrix(getCommonAttributeMatrixName());
+  IDataArray::Pointer da = am->getAttributeArray(getCommonDataArrayName());
 
-    EXECUTE_STITCH_FUNCTION_TEMPLATE(this, stitchMontage, da);
-  }
+  EXECUTE_STITCH_FUNCTION_TEMPLATE(this, stitchMontage, da);
+
   /* Let the GUI know we are done with this filter */
   notifyStatusMessage("Complete");
-}
-
-// -----------------------------------------------------------------------------
-//
-// -----------------------------------------------------------------------------
-void ITKStitchMontage::createFijiDataStructure()
-{
-  DataContainerArray* dca = getDataContainerArray().get();
-  // Loop over the data containers until we find the proper data container
-  QMutableListIterator<QString> dcNameIter(m_ImageDataContainers);
-  QStringList dcList;
-  bool dataContainerPrefixChanged = false;
-
-  int32_t rowCount = m_MontageSize[1];
-  int32_t colCount = m_MontageSize[0];
-
-  if(m_ImageDataContainers.size() != (colCount * rowCount))
-  {
-    return;
-  }
-
-  m_StageTiles.resize(rowCount);
-  // for(unsigned i = 0; i < m_yMontageSize; i++)
-  for(auto& stageTile : m_StageTiles)
-  {
-    stageTile.resize(colCount);
-  }
-
-  std::vector<size_t> cDims;
-  while(dcNameIter.hasNext())
-  {
-    QString dcName = dcNameIter.next();
-    dcList.push_back(dcName);
-    DataContainer::Pointer dcItem = dca->getPrereqDataContainer(this, dcName);
-    if(getErrorCode() < 0 || dcItem.get() == nullptr)
-    {
-      continue;
-    }
-    ImageGeom::Pointer image = dcItem->getGeometryAs<ImageGeom>();
-    //   SizeVec3Type dimensions = image->getDimensions();
-    FloatVec3Type origin = image->getOrigin();
-
-    // Extract row and column data from the data container name
-    //    QString filename = ""; // Need to find this?
-    int indexOfUnderscore = dcName.lastIndexOf("_");
-    if(!dataContainerPrefixChanged)
-    {
-      m_dataContainerPrefix = dcName.left(indexOfUnderscore);
-      dataContainerPrefixChanged = true;
-    }
-    QString rowCol = dcName.right(dcName.size() - indexOfUnderscore - 1);
-    rowCol = rowCol.right(rowCol.size() - 1);     // Remove 'r'
-    QStringList rowCol_Split = rowCol.split("c"); // Split by 'c'
-    int row = rowCol_Split[0].toInt();
-    int col = rowCol_Split[1].toInt();
-    itk::Tile2D tile;
-    tile.Position[0] = origin[0];
-    tile.Position[1] = origin[1];
-    tile.FileName = ""; // This code gets its data from memory, not from a file
-
-    m_StageTiles[row][col] = tile;
-
-    int err = 0;
-    AttributeMatrix::Pointer am = dcItem->getPrereqAttributeMatrix(this, getCommonAttributeMatrixName(), err);
-  }
 }
 
 // -----------------------------------------------------------------------------
@@ -575,6 +499,15 @@ void ITKStitchMontage::initializeResampler(typename Resampler::Pointer resampler
   using OriginalImageType = itk::Dream3DImage<PixelType, Dimension>;
   using TransformType = itk::TranslationTransform<double, Dimension>;
 
+  DataContainerArray::Pointer dca = getDataContainerArray();
+
+  GridMontage::Pointer gridMontage = std::dynamic_pointer_cast<GridMontage>(dca->getMontage(m_MontageName));
+  if(gridMontage == nullptr)
+  {
+    setErrorCondition(-206, tr("The montage '%1' is not a grid montage.").arg(m_MontageName));
+    return;
+  }
+
   typename MontageType::TileIndexType ind;
   for(unsigned y = m_MontageStart[1]; y <= m_MontageEnd[1]; y++)
   {
@@ -584,7 +517,8 @@ void ITKStitchMontage::initializeResampler(typename Resampler::Pointer resampler
       ind[0] = x;
       using toITKType = itk::InPlaceDream3DDataToImageFilter<PixelType, Dimension>;
       typename toITKType::Pointer toITK = toITKType::New();
-      DataContainer::Pointer imageDC = GetImageDataContainer(y, x);
+      GridTileIndex tileIndex = gridMontage->getTileIndex(y, x);
+      DataContainerShPtr imageDC = tileIndex.getDataContainer();
       // Check the resolution and fix if necessary
       ImageGeom::Pointer geom = imageDC->getGeometryAs<ImageGeom>();
 
@@ -668,38 +602,6 @@ void ITKStitchMontage::convertMontageToD3D(OriginalImageType* image)
   toDream3DFilter->SetDataArrayName(dataArrayPath.getDataArrayName().toStdString());
   toDream3DFilter->SetDataContainer(container);
   toDream3DFilter->Update();
-}
-
-// -----------------------------------------------------------------------------
-//
-// -----------------------------------------------------------------------------
-DataContainer::Pointer ITKStitchMontage::GetImageDataContainer(int y, int x)
-{
-  DataContainerArray* dca = getDataContainerArray().get();
-  // Loop over the data containers until we find the proper data container
-  QMutableListIterator<QString> dcNameIter(m_ImageDataContainers);
-  QStringList dcList;
-  while(dcNameIter.hasNext())
-  {
-    QString dcName = dcNameIter.next();
-    dcList.push_back(dcName);
-    DataContainer::Pointer dcItem = dca->getPrereqDataContainer(this, dcName);
-    if(getErrorCode() < 0 || dcItem.get() == nullptr)
-    {
-      continue;
-    }
-
-    QString rowCol = dcName.right(dcName.size() - dcName.lastIndexOf("_") - 1);
-    rowCol = rowCol.right(rowCol.size() - 1);     // Remove 'r'
-    QStringList rowCol_Split = rowCol.split("c"); // Split by 'c'
-    int row = rowCol_Split[0].toInt();
-    int col = rowCol_Split[1].toInt();
-    if(row == y && col == x)
-    {
-      return dcItem;
-    }
-  }
-  return nullptr;
 }
 
 // -----------------------------------------------------------------------------

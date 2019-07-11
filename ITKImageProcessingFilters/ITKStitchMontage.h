@@ -60,9 +60,9 @@ class ITKImageProcessing_EXPORT ITKStitchMontage : public AbstractFilter
 {
   Q_OBJECT
   PYB11_CREATE_BINDINGS(ITKStitchMontage SUPERCLASS AbstractFilter)
+  PYB11_PROPERTY(QString MontageName READ getMontageName WRITE setMontageName)
   PYB11_PROPERTY(IntVec2Type MontageStart READ getMontageStart WRITE setMontageStart)
   PYB11_PROPERTY(IntVec2Type MontageEnd READ getMontageEnd WRITE setMontageEnd)
-  PYB11_PROPERTY(QStringList ImageDataContainers READ getImageDataContainers WRITE setImageDataContainers)
   PYB11_PROPERTY(QString CommonAttributeMatrixName READ getCommonAttributeMatrixName WRITE setCommonAttributeMatrixName)
   PYB11_PROPERTY(QString CommonDataArrayName READ getCommonDataArrayName WRITE setCommonDataArrayName)
   PYB11_PROPERTY(QString MontageDataContainerName READ getMontageDataContainerName WRITE setMontageDataContainerName)
@@ -76,14 +76,14 @@ public:
 
   ~ITKStitchMontage() override;
 
+  SIMPL_FILTER_PARAMETER(QString, MontageName)
+  Q_PROPERTY(QString MontageName READ getMontageName WRITE setMontageName)
+
   SIMPL_FILTER_PARAMETER(IntVec2Type, MontageStart)
   Q_PROPERTY(IntVec2Type MontageStart READ getMontageStart WRITE setMontageStart)
 
   SIMPL_FILTER_PARAMETER(IntVec2Type, MontageEnd)
   Q_PROPERTY(IntVec2Type MontageEnd READ getMontageEnd WRITE setMontageEnd)
-
-  SIMPL_FILTER_PARAMETER(QStringList, ImageDataContainers)
-  Q_PROPERTY(QStringList ImageDataContainers READ getImageDataContainers WRITE setImageDataContainers)
 
   SIMPL_FILTER_PARAMETER(QString, CommonAttributeMatrixName)
   Q_PROPERTY(QString CommonAttributeMatrixName READ getCommonAttributeMatrixName WRITE setCommonAttributeMatrixName)
@@ -208,13 +208,6 @@ protected:
   void stitchMontage(int peakMethodToUse = 0, unsigned streamSubdivisions = 1);
 
   /**
-   * @brief Get the image from the appropriate data container
-   * @param y
-   * @param x
-   */
-  DataContainer::Pointer GetImageDataContainer(int y, int x);
-
-  /**
    * @brief Get the transform container from an affine transform
    * @param itkAffine
    */
@@ -222,9 +215,6 @@ protected:
 
 private:
   static constexpr unsigned Dimension = 2;
-  itk::TileLayout2D m_StageTiles;
-  itk::TileLayout2D m_ActualTiles;
-  QString m_dataContainerPrefix;
   IntVec2Type m_MontageSize;
 
   /**
